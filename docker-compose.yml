@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: my-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: teamboost
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - teamboost-network
+
+  
+  live-updates:
+    build:
+      context: .
+      dockerfile: Dockerfile.live-updates
+    container_name: teamboost-live-updates
+    environment:
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-teamboost}
+      - DB_HOST=postgres  
+      - DB_PORT=${DB_PORT:-5432}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - postgres
+    networks:
+      - teamboost-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  teamboost-network:
+    driver: bridge
