@@ -53,11 +53,12 @@ async def connect_database() -> asyncpg.Pool:
 async def fetch_tasks_without_embeddings(pool: asyncpg.Pool, limit: int) -> List[Dict[str, Any]]:
     
     query = """
-        SELECT id, title, description
-        FROM tasks
-        WHERE embedding IS NULL
-        LIMIT $1
-    """
+    SELECT t.id AS task_id, t.title, t.description
+    FROM tasks t
+    JOIN task_embeddings te ON te.task_id = t.id
+    WHERE te.status = 'pending'
+    LIMIT $1;
+"""
     async with pool.acquire() as conn:
         rows = await conn.fetch(query, limit)
     return [dict(row) for row in rows]
@@ -94,7 +95,13 @@ async def save_embedding(pool: asyncpg.Pool, task_id: str, embedding: List[float
 
     vector_str = '[' + ','.join(map(str, embedding)) + ']'
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE tasks SET embedding = $1::vector WHERE id = $2", vector_str, task_id)
+        await conn.execute(
+        """ UPDATE task_embeddings
+            SET embedding = $1::vector,
+            status = 'done',
+            updated_at = now()
+            WHERE task_id = $2;"""
+    , vector_str, task_id)
 
 
 async def process_pending_tasks(pool: asyncpg.Pool, session: aiohttp.ClientSession):
@@ -111,10 +118,10 @@ async def process_pending_tasks(pool: asyncpg.Pool, session: aiohttp.ClientSessi
         text = prepare_text(task['title'], task.get('description'))
         embedding = await generate_embedding(session, text)
         if embedding:
-            await save_embedding(pool, task['id'], embedding)
+            await save_embedding(pool, task['task_id'], embedding)  
             successful += 1
         else:
-            logger.error(f"Failed to generate embedding for task {task['id']}")
+            logger.error(f"Failed to generate embedding for task {task['task_id']}")
         if i < len(tasks):
             await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
     logger.info(f"Processed {successful}/{len(tasks)} tasks successfully")
